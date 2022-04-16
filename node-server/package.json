@@ -1,0 +1,13 @@
+{
+    "name": "dmx-web-api-server",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dmx": "node src/dmx-server.js"
+    },
+    "dependencies": {
+        "socket.io": "^4.4.1",
+        "enttec-open-dmx-usb": "^3.0.0",
+        "dmx-web-api": "^0.1.0"
+    }
+}
