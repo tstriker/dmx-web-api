@@ -5,6 +5,8 @@ export class DMX {
         this.writer = null;
         this.ready = false;
         this.backendClass = backend;
+
+        this._sendInterval = null;
     }
 
     async init() {
@@ -16,15 +18,20 @@ export class DMX {
         await this.backend.init();
         this.ready = true;
 
-        // seems like every 50ms or so is what the dongle can support before it becomes overwhelmed
-        setInterval(() => this.sendLoop(), 50);
+        // seems like every 50ms or so is what the dongles can support before they become overwhelmed
+        this._sendInterval = setInterval(() => this._sendLoop(), 50);
     }
 
-    async sendLoop() {
+    async _sendLoop() {
         this.backend.sendSignal(this.data);
     }
 
     async update(data) {
+        if (!this.backend) {
+            console.log("Can't run update before init() has been called!");
+            return;
+        }
+
         Object.entries(data).forEach(([ch, val]) => {
             this.data[parseInt(ch) - 1] = parseInt(val);
         });
@@ -32,7 +39,10 @@ export class DMX {
     }
 
     async close() {
-        this.backend.close();
+        clearInterval(this._sendInterval);
+        if (this.backend) {
+            this.backend.close();
+        }
     }
 }
 
