@@ -30,6 +30,10 @@ export class DMX {
         });
         this.backend.onUpdate(data);
     }
+
+    async close() {
+        this.backend.close();
+    }
 }
 
 export class Backend {
@@ -38,6 +42,7 @@ export class Backend {
     init() {}
     onUpdate() {}
     sendSignal() {}
+    close() {}
 }
 
 export class SerialBackend extends Backend {
@@ -79,6 +84,11 @@ export class SerialBackend extends Backend {
     async requestPermission() {
         await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
         this.init();
+    }
+
+    async close() {
+        await this.writer.releaseLock();
+        await this.port.close();
     }
 }
 
