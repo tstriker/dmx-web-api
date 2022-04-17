@@ -33,7 +33,14 @@ export class DMX {
         }
 
         Object.entries(data).forEach(([ch, val]) => {
-            this.data[parseInt(ch) - 1] = parseInt(val);
+            let [chInt, valInt] = [parseInt(ch), parseInt(val)];
+            if (chInt < 1 || chInt > 512) {
+                console.error(`Channel should be between 1 and 512. Received ${ch}`);
+            } else if (valInt < 0 || valInt > 255) {
+                console.error(`Value should be between 0 and 255. Received channel: ${ch}, value: ${val}`);
+            } else {
+                this.data[chInt - 1] = valInt;
+            }
         });
         this.backend.onUpdate(data);
     }
