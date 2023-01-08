@@ -12,7 +12,7 @@ export class DMX {
     }
 
     async canAccess() {
-        if (this.serial) {
+        if (this.serial && navigator.serial) {
             let ports = await navigator.serial.getPorts();
             return ports.length > 0;
         }
