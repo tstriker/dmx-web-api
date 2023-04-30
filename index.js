@@ -39,17 +39,22 @@ export class DMX {
             try {
                 await this.backend.sendSignal(this.data);
             } catch (error) {
+                console.error(error);
                 console.error("Failed to send signal to DMX controller, will attempt to reconnect");
                 this.ready = false;
             }
             // seems like every 50ms or so is what the dongles can support before they become overwhelmed
-            this._sendInterval = setTimeout(() => this._sendLoop(), 50);
+            if (!this._sendInterval) {
+                this._sendInterval = setInterval(() => this._sendLoop(), 50);
+            }
         } else {
+            clearInterval(this._sendInterval);
+            this._sendInterval = null;
             try {
                 await this.init();
             } catch (error) {
                 console.error("Reconnect failed. Retry in 300ms");
-                this._sendInterval = setTimeout(() => this._sendLoop(), 300);
+                setTimeout(() => this._sendLoop(), 300);
             }
         }
     }
@@ -99,6 +104,10 @@ export class SerialBackend extends Backend {
         this.port = null;
     }
 
+    requestPermission() {
+        return navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
+    }
+
     async init() {
         let ports = await navigator.serial.getPorts();
         if (!ports.length) {
@@ -127,10 +136,6 @@ export class SerialBackend extends Backend {
         this.writer = await this.port.writable.getWriter();
     }
 
-    static async requestPermission() {
-        await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
-    }
-
     async close() {
         await this.writer.releaseLock();
         await this.port.close();
@@ -149,7 +154,7 @@ export class Eurolite extends SerialBackend {
     }
 
     async sendSignal(data) {
-        if (!this.changed) {
+        if (!this.changed || !this.writer) {
             return;
         }
         this.changed = false;
@@ -163,6 +168,11 @@ export class EnttecOpen extends SerialBackend {
     // otherwise chrome will spin down the timers and the lights will start flickering
     label = "Enttec Open DMX USB in browser. Keep the tab visible!";
     async sendSignal(data) {
+        if (!this.port || !this.writer) {
+            // we are not ready yet
+            return;
+        }
+
         await this.port.setSignals({break: true, requestToSend: false});
         await this.port.setSignals({break: false, requestToSend: false});
         await this.writer.write(new Uint8Array([0x00, ...data]));
