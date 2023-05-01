@@ -104,14 +104,14 @@ export class SerialBackend extends Backend {
         this.port = null;
     }
 
-    requestPermission() {
+    static requestPermission() {
         return navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
     }
 
     async init() {
         let ports = await navigator.serial.getPorts();
         if (!ports.length) {
-            await this.requestPermission();
+            await SerialBackend.requestPermission();
             this.init();
             return;
         }
