@@ -1,21 +1,21 @@
 {
-  "name": "dmx-web-api",
-  "version": "0.1.7",
-  "description": "Talk DMX via USB directly in the browser (Chrome only for now)",
-  "main": "index.js",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tstriker/dmx-web-api.git"
-  },
-  "keywords": [
-    "dmx",
-    "serial",
-    "web-serial-api"
-  ],
-  "author": "Tom Striker",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/tstriker/dmx-web-api/issues"
-  },
-  "homepage": "https://github.com/tstriker/dmx-web-api#readme"
+    "name": "dmx-web-api",
+    "version": "0.1.8",
+    "description": "Talk DMX via USB directly in the browser (Chrome only for now)",
+    "main": "index.js",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/tstriker/dmx-web-api.git"
+    },
+    "keywords": [
+        "dmx",
+        "serial",
+        "web-serial-api"
+    ],
+    "author": "Tom Striker",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/tstriker/dmx-web-api/issues"
+    },
+    "homepage": "https://github.com/tstriker/dmx-web-api#readme"
 }

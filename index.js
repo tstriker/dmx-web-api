@@ -35,6 +35,7 @@ export class DMX {
     }
 
     async _sendLoop() {
+        clearInterval(this._sendInterval);
         if (this.ready) {
             try {
                 await this.backend.sendSignal(this.data);
@@ -44,17 +45,13 @@ export class DMX {
                 this.ready = false;
             }
             // seems like every 50ms or so is what the dongles can support before they become overwhelmed
-            if (!this._sendInterval) {
-                this._sendInterval = setInterval(() => this._sendLoop(), 50);
-            }
+            this._sendInterval = setTimeout(() => this._sendLoop(), 50);
         } else {
-            clearInterval(this._sendInterval);
-            this._sendInterval = null;
             try {
                 await this.init();
             } catch (error) {
                 console.error("Reconnect failed. Retry in 300ms");
-                setTimeout(() => this._sendLoop(), 300);
+                this._sendInterval = setTimeout(() => this._sendLoop(), 300);
             }
         }
     }
