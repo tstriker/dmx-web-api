@@ -7,8 +7,8 @@ export class DMX {
         this.serial = true;
         this.backends = {eurolite: Eurolite, "enttec-open-dmx": EnttecOpen};
         this.backendClass = backend || null;
+        this.onTick = null;
         this._sendInterval = null;
-        this.prev = 0;
     }
 
     async canAccess() {
@@ -18,7 +18,8 @@ export class DMX {
         }
     }
 
-    async init(backendName = null) {
+    async init(backendName = null, onTick = null) {
+        this.onTick = onTick;
         if (this.ready) {
             return;
         }
@@ -37,15 +38,18 @@ export class DMX {
     async _sendLoop() {
         clearInterval(this._sendInterval);
         if (this.ready) {
-            try {
-                await this.backend.sendSignal(this.data);
-            } catch (error) {
+            if (this.onTick) {
+                this.onTick();
+            }
+
+            this.backend.sendSignal(this.data).catch(error => {
                 console.error(error);
                 console.error("Failed to send signal to DMX controller, will attempt to reconnect");
                 this.ready = false;
-            }
-            // seems like every 50ms or so is what the dongles can support before they become overwhelmed
-            this._sendInterval = setTimeout(() => this._sendLoop(), 50);
+            });
+            // NOTE: DMX protocol operates at max 44fps, so best we can hope for is a frame every 22ms
+            // https://en.wikipedia.org/wiki/DMX512
+            this._sendInterval = setTimeout(() => this._sendLoop(), 23);
         } else {
             try {
                 await this.init();
@@ -80,6 +84,7 @@ export class DMX {
         if (this.backend) {
             this.backend.close();
         }
+        this.ready = false;
     }
 }
 
@@ -144,17 +149,20 @@ export class Eurolite extends SerialBackend {
     label = "Eurolite DMX512 Pro Mk2";
     constructor() {
         super();
-        this.changed = true;
+        this.same = 0;
     }
     onUpdate() {
-        this.changed = true;
+        this.same = 0;
     }
 
     async sendSignal(data) {
-        if (!this.changed || !this.writer) {
+        if (this.same > 3 || !this.writer) {
             return;
         }
-        this.changed = false;
+        // every now and then the cache loses a frame and we end up with not the final state
+        // to mitigated that instead of using a 'changed' boolean we use a sameness incrementor
+        // this means that we'll send 4 frames of the final state when things calm down
+        this.same += 1;
         await this.writer.ready;
         await this.writer.write(new Uint8Array([0x7e, 0x06, 0x01, 0x02, 0x00, ...data, 0xe7]));
     }
