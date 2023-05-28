@@ -80,9 +80,7 @@ export class DMX {
         if (this.bySerial[this.serialNumber]) {
             this.backend = new this.bySerial[this.serialNumber](this.port, this.writer);
             this.ready = true;
-            console.log("calling sendloop");
             this._sendLoop();
-            console.log("ffff", this.backend);
         } else {
             console.error("unrecognized serial number:", this.serialNumber);
         }
