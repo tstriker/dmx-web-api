@@ -16,14 +16,14 @@ Unfortunately other browsers do not yet support neither the Serial nor USB API's
 # Demo
 
 ```javascript
-import {DMX, Eurolite} from "dmx-web-api";
+import {DMX} from "dmx-web-api";
 
-let dmxDevice = new DMX(Eurolite);
+let dmxDevice = new DMX();
 
 function initDMX() {
     // call this func on a user action, like a click or tap as
     // the init will ask for permission to access
-    this.dmxDevice.init();
+    this.dmxDevice.connect();
 }
 
 function updateDMX(data) {

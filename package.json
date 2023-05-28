@@ -1,6 +1,6 @@
 {
     "name": "dmx-web-api",
-    "version": "0.1.9",
+    "version": "0.2.0",
     "description": "Talk DMX via USB directly in the browser (Chrome only for now)",
     "main": "index.js",
     "repository": {

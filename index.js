@@ -1,60 +1,118 @@
 export class DMX {
-    constructor(backend) {
+    constructor() {
         this.port = null;
         this.data = new Uint8Array(512);
         this.writer = null;
         this.ready = false;
-        this.serial = true;
-        this.backends = {eurolite: Eurolite, "enttec-open-dmx": EnttecOpen};
-        this.backendClass = backend || null;
         this.onTick = null;
         this._sendInterval = null;
+
+        this.serialNumber = null;
+        this.backend = null;
+        this.bySerial = {
+            [Eurolite.serialNumber]: Eurolite,
+            [EnttecOpen.serialNumber]: EnttecOpen,
+        };
     }
 
     async canAccess() {
-        if (this.serial && navigator.serial) {
-            let ports = await navigator.serial.getPorts();
-            return ports.length > 0;
+        let ports = await navigator.serial.getPorts();
+        return ports.length > 0;
+    }
+
+    async connectToDongle(askPermission = true) {
+        // we want to sniff out the serial number, but the web serial API does not give us that information
+        // (something about fingerprinting, which is stupid, because webUSB api does hand that information)
+        // so we first ask for permission from webUSB and then get the actual writer from webSerial
+        let devices = await navigator.usb.getDevices({filters: [{vendorId: 0x0403}]});
+        let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
+        this.writer = null;
+        this.port = null;
+
+        if (!devices.length && askPermission) {
+            await navigator.usb.requestDevice({filters: [{vendorId: 0x0403}]});
+            devices = await navigator.usb.getDevices({filters: [{vendorId: 0x0403}]});
+        }
+
+        if (devices.length) {
+            this.serialNumber = devices[0].serialNumber;
+
+            if (!ports.length && askPermission) {
+                await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
+                ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
+            }
+        }
+
+        if (ports.length) {
+            // just grab the first one; not gonna deal with multi usb-to-dmx setup just yet
+            let port = ports[0];
+            try {
+                await port.open({
+                    baudRate: 250 * 1000,
+                    dataBits: 8,
+                    stopBits: 2,
+                    parity: "none",
+                });
+            } catch (e) {
+                if (e.name != "InvalidStateError") {
+                    // invalid state error is when port is already open, which is fine by us.
+                    // Anything else we throw
+                    throw e;
+                }
+            }
+
+            this.port = port;
+            this.writer = await this.port.writable.getWriter();
         }
     }
 
-    async init(backendName = null, onTick = null) {
+    async connect(onTick, askPermission = true) {
         this.onTick = onTick;
         if (this.ready) {
             return;
         }
 
-        if (backendName) {
-            this.backendClass = this.backends[backendName];
+        await this.connectToDongle(askPermission);
+        if (!this.writer) {
+            return;
         }
 
-        this.backend = new this.backendClass();
-        await this.backend.init();
-        this.ready = true;
-
-        this._sendLoop();
+        if (this.bySerial[this.serialNumber]) {
+            this.backend = new this.bySerial[this.serialNumber](this.port, this.writer);
+            this.ready = true;
+            console.log("calling sendloop");
+            this._sendLoop();
+            console.log("ffff", this.backend);
+        } else {
+            console.error("unrecognized serial number:", this.serialNumber);
+        }
     }
 
     async _sendLoop() {
         clearInterval(this._sendInterval);
-        if (this.ready) {
+        if (this.writer) {
             if (this.onTick) {
                 this.onTick();
             }
 
             this.backend.sendSignal(this.data).catch(error => {
+                this.writer = null;
+                this.ready = false;
+                // Note: the failure message will appear in the logs a few times as we are not doing blocking requests
+                // here and so we might try issuing a bunch of sendSignals before we catch up with the fact that
+                // the dongle is gone
                 console.error(error);
                 console.error("Failed to send signal to DMX controller, will attempt to reconnect");
-                this.ready = false;
             });
-            // NOTE: DMX protocol operates at max 44fps, so best we can hope for is a frame every 22ms
-            // https://en.wikipedia.org/wiki/DMX512
-            this._sendInterval = setTimeout(() => this._sendLoop(), 23);
+
+            // Note: DMX protocol operates at max 44fps (but 40fps is safer as enttec pushes for that), so best we can
+            // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
+            this._sendInterval = setTimeout(() => this._sendLoop(), 25);
         } else {
-            try {
-                await this.init();
-            } catch (error) {
-                console.error("Reconnect failed. Retry in 300ms");
+            await this.connect(this.onTick, false);
+
+            if (!this.writer) {
+                console.info("Reconnect failed. Retry in 300ms");
                 this._sendInterval = setTimeout(() => this._sendLoop(), 300);
             }
         }
@@ -81,9 +139,8 @@ export class DMX {
 
     async close() {
         clearInterval(this._sendInterval);
-        if (this.backend) {
-            this.backend.close();
-        }
+        await this.writer.releaseLock();
+        await this.port.close();
         this.ready = false;
     }
 }
@@ -100,57 +157,23 @@ class Backend {
 export class SerialBackend extends Backend {
     // serial uses the web serial API directly
     // https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
-    constructor() {
+    constructor(port, writer) {
         super();
-        this.writer = null;
-        this.port = null;
-    }
-
-    static requestPermission() {
-        return navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
-    }
-
-    async init() {
-        let ports = await navigator.serial.getPorts();
-        if (!ports.length) {
-            await SerialBackend.requestPermission();
-            this.init();
-            return;
-        }
-
-        // just grab the first for now that matches our specs
-        this.port = ports[0];
-
-        try {
-            await this.port.open({
-                baudRate: 250 * 1000,
-                dataBits: 8,
-                stopBits: 2,
-                parity: "none",
-            });
-        } catch (e) {
-            if (e.name != "InvalidStateError") {
-                // invalid state error is when port is already open, which is fine by us.
-                // Anything else we throw
-                throw e;
-            }
-        }
-        this.writer = await this.port.writable.getWriter();
-    }
-
-    async close() {
-        await this.writer.releaseLock();
-        await this.port.close();
+        this.port = port;
+        this.writer = writer;
     }
 }
 
 export class Eurolite extends SerialBackend {
     // a buffered interface that is very specific about its init message
-    label = "Eurolite DMX512 Pro Mk2";
-    constructor() {
-        super();
+    static label = "Eurolite DMX512 Pro Mk2";
+    static serialNumber = "AQ01F1UV";
+
+    constructor(port, writer) {
+        super(port, writer);
         this.same = 0;
     }
+
     onUpdate() {
         this.same = 0;
     }
@@ -171,7 +194,9 @@ export class Eurolite extends SerialBackend {
 export class EnttecOpen extends SerialBackend {
     // just a dumb forwarder. one caveat is that you have to keep the tab visible or
     // otherwise chrome will spin down the timers and the lights will start flickering
-    label = "Enttec Open DMX USB in browser. Keep the tab visible!";
+    static label = "Enttec Open DMX USB in browser. Keep the tab visible!";
+    static serialNumber = "AB0MRQT7";
+
     async sendSignal(data) {
         if (!this.port || !this.writer) {
             // we are not ready yet
