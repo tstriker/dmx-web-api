@@ -1,4 +1,69 @@
+class Backend {
+    // abstract away the different ways to talk DMX
+    label = "";
+    init() {}
+    onUpdate() {}
+    sendSignal() {}
+    close() {}
+}
+
+export class SerialBackend extends Backend {
+    // serial uses the web serial API directly
+    // https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
+    constructor(port, writer) {
+        super();
+        this.port = port;
+        this.writer = writer;
+    }
+}
+
+export class Eurolite extends SerialBackend {
+    // a buffered interface that is very specific about its init message
+    static label = "Eurolite Pro Mk2";
+
+    constructor(port, writer) {
+        super(port, writer);
+        this.same = 0;
+    }
+
+    onUpdate() {
+        this.same = 0;
+    }
+
+    async sendSignal(data) {
+        if (this.same > 3 || !this.writer) {
+            return;
+        }
+        // every now and then the cache loses a frame and we end up with not the final state
+        // to mitigated that instead of using a 'changed' boolean we use a sameness incrementor
+        // this means that we'll send 4 frames of the final state when things calm down
+        this.same += 1;
+        await this.writer.ready;
+        await this.writer.write(new Uint8Array([0x7e, 0x06, 0x01, 0x02, 0x00, ...data, 0xe7]));
+    }
+}
+
+export class EnttecOpen extends SerialBackend {
+    // just a dumb forwarder. one caveat is that you have to keep the tab visible or
+    // otherwise chrome will spin down the timers and the lights will start flickering
+    static label = "Enttec Open DMX";
+
+    async sendSignal(data) {
+        if (!this.port || !this.writer) {
+            // we are not ready yet
+            return;
+        }
+
+        await this.writer.ready;
+        await this.port.setSignals({break: true, requestToSend: false});
+        await this.port.setSignals({break: false, requestToSend: false});
+        await this.writer.write(new Uint8Array([0x00, ...data]));
+    }
+}
+
 export class DMX {
+    static backends = [Eurolite, EnttecOpen];
+
     constructor() {
         this.port = null;
         this.data = new Uint8Array(512);
@@ -7,12 +72,8 @@ export class DMX {
         this.onTick = null;
         this._sendInterval = null;
 
-        this.serialNumber = null;
+        this.backendClass = null;
         this.backend = null;
-        this.bySerial = {
-            [Eurolite.serialNumber]: Eurolite,
-            [EnttecOpen.serialNumber]: EnttecOpen,
-        };
     }
 
     async canAccess() {
@@ -20,27 +81,18 @@ export class DMX {
         return ports.length > 0;
     }
 
-    async connectToDongle(askPermission = true) {
+    async init(backendClass, askPermission = true) {
         // we want to sniff out the serial number, but the web serial API does not give us that information
         // (something about fingerprinting, which is stupid, because webUSB api does hand that information)
         // so we first ask for permission from webUSB and then get the actual writer from webSerial
-        let devices = await navigator.usb.getDevices({filters: [{vendorId: 0x0403}]});
         let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
         this.writer = null;
         this.port = null;
+        this.backendClass = backendClass;
 
-        if (!devices.length && askPermission) {
-            await navigator.usb.requestDevice({filters: [{vendorId: 0x0403}]});
-            devices = await navigator.usb.getDevices({filters: [{vendorId: 0x0403}]});
-        }
-
-        if (devices.length) {
-            this.serialNumber = devices[0].serialNumber;
-
-            if (!ports.length && askPermission) {
-                await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
-                ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
-            }
+        if (!ports.length && askPermission) {
+            await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
+            ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
         }
 
         if (ports.length) {
@@ -66,23 +118,21 @@ export class DMX {
         }
     }
 
-    async connect(onTick, askPermission = true) {
+    async connect(backendClass, onTick, askPermission = true) {
         this.onTick = onTick;
         if (this.ready) {
             return;
         }
 
-        await this.connectToDongle(askPermission);
+        await this.init(backendClass, askPermission);
         if (!this.writer) {
             return;
         }
 
-        if (this.bySerial[this.serialNumber]) {
-            this.backend = new this.bySerial[this.serialNumber](this.port, this.writer);
+        if (this.backendClass) {
+            this.backend = new this.backendClass(this.port, this.writer);
             this.ready = true;
             this._sendLoop();
-        } else {
-            console.error("unrecognized serial number:", this.serialNumber);
         }
     }
 
@@ -107,7 +157,7 @@ export class DMX {
             // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
             this._sendInterval = setTimeout(() => this._sendLoop(), 25);
         } else {
-            await this.connect(this.onTick, false);
+            await this.connect(this.backendClass, this.onTick, false);
 
             if (!this.writer) {
                 console.info("Reconnect failed. Retry in 300ms");
@@ -137,73 +187,10 @@ export class DMX {
 
     async close() {
         clearInterval(this._sendInterval);
-        await this.writer.releaseLock();
-        await this.port.close();
+        if (this.writer) {
+            await this.writer.releaseLock();
+            await this.port.close();
+        }
         this.ready = false;
-    }
-}
-
-class Backend {
-    // abstract away the different ways to talk DMX
-    label = "";
-    init() {}
-    onUpdate() {}
-    sendSignal() {}
-    close() {}
-}
-
-export class SerialBackend extends Backend {
-    // serial uses the web serial API directly
-    // https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
-    constructor(port, writer) {
-        super();
-        this.port = port;
-        this.writer = writer;
-    }
-}
-
-export class Eurolite extends SerialBackend {
-    // a buffered interface that is very specific about its init message
-    static label = "Eurolite DMX512 Pro Mk2";
-    static serialNumber = "AQ01F1UV";
-
-    constructor(port, writer) {
-        super(port, writer);
-        this.same = 0;
-    }
-
-    onUpdate() {
-        this.same = 0;
-    }
-
-    async sendSignal(data) {
-        if (this.same > 3 || !this.writer) {
-            return;
-        }
-        // every now and then the cache loses a frame and we end up with not the final state
-        // to mitigated that instead of using a 'changed' boolean we use a sameness incrementor
-        // this means that we'll send 4 frames of the final state when things calm down
-        this.same += 1;
-        await this.writer.ready;
-        await this.writer.write(new Uint8Array([0x7e, 0x06, 0x01, 0x02, 0x00, ...data, 0xe7]));
-    }
-}
-
-export class EnttecOpen extends SerialBackend {
-    // just a dumb forwarder. one caveat is that you have to keep the tab visible or
-    // otherwise chrome will spin down the timers and the lights will start flickering
-    static label = "Enttec Open DMX USB in browser. Keep the tab visible!";
-    static serialNumber = "AB0MRQT7";
-
-    async sendSignal(data) {
-        if (!this.port || !this.writer) {
-            // we are not ready yet
-            return;
-        }
-
-        await this.writer.ready;
-        await this.port.setSignals({break: true, requestToSend: false});
-        await this.port.setSignals({break: false, requestToSend: false});
-        await this.writer.write(new Uint8Array([0x00, ...data]));
     }
 }

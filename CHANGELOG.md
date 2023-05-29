@@ -1,3 +1,10 @@
+# 0.2.3
+
+-   Failed miserably with the sniffing of model because serial numbers for
+    these dongle's aren't specific to the repackager but rather they
+    are just unique; so no way for now to tell an enttec apart from a eurolite.
+    oh well. back to feeding in a model in constructor
+
 # 0.2.2
 
 -   Still battling timing woes; The dongles do not want to adhere to exact
