@@ -1,3 +1,9 @@
+# 0.2.2
+
+-   Still battling timing woes; The dongles do not want to adhere to exact
+    40fps rather have to do a blocking send and then give a bit of time for
+    the thing to breathe before sending the next package
+
 # 0.2.0
 
 -   Instead of requesting that a backend class is passed in, we ask user to grant

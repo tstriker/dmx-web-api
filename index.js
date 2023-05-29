@@ -93,7 +93,7 @@ export class DMX {
                 this.onTick();
             }
 
-            this.backend.sendSignal(this.data).catch(error => {
+            await this.backend.sendSignal(this.data).catch(error => {
                 this.writer = null;
                 this.ready = false;
                 // Note: the failure message will appear in the logs a few times as we are not doing blocking requests
@@ -201,6 +201,7 @@ export class EnttecOpen extends SerialBackend {
             return;
         }
 
+        await this.writer.ready;
         await this.port.setSignals({break: true, requestToSend: false});
         await this.port.setSignals({break: false, requestToSend: false});
         await this.writer.write(new Uint8Array([0x00, ...data]));
