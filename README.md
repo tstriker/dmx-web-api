@@ -21,10 +21,13 @@ import {DMX, Eurolite} from "dmx-web-api";
 let dmxDevice = new DMX();
 
 function initDMX() {
-    // call this func on a user action, like a click or tap as
-    // the init will ask for permission to access
-    // right now the two supported dongles are Eurolite Mk2, and Enttect Open USB
-    this.dmxDevice.connect(Eurolite);
+    // the three params passed into init are as follows:
+    // * onTick - callback that will be executed on every tick
+    // * backendClass - the class of the backend widget. right now there is just Eurolite and Enttec's Open USB
+    // * requestAccess - default:false, when set to true will ask user to give us access. you can do that only on
+    //   user action. so on init you can call it with false, and then have an interface element that allows user to
+    //   enable access to the device
+    this.dmxDevice.connect(null, Eurolite, true);
 }
 
 function updateDMX(data) {

@@ -68,12 +68,13 @@ export class DMX {
         this.port = null;
         this.data = new Uint8Array(512);
         this.writer = null;
-        this.ready = false;
         this.onTick = null;
-        this._sendInterval = null;
+        this._sendTimeout = null;
 
         this.backendClass = null;
         this.backend = null;
+
+        this.retry = false;
     }
 
     async canAccess() {
@@ -81,97 +82,88 @@ export class DMX {
         return ports.length > 0;
     }
 
-    async init(backendClass, askPermission = true) {
-        // we want to sniff out the serial number, but the web serial API does not give us that information
-        // (something about fingerprinting, which is stupid, because webUSB api does hand that information)
-        // so we first ask for permission from webUSB and then get the actual writer from webSerial
-        let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
-        this.writer = null;
-        this.port = null;
-        this.backendClass = backendClass;
+    async connect(onTick, backendClass = null, askPermission = false) {
+        // DMX class has an internal clock that makes sure we don't write to the DMX widget too often
+        // to reduce off-sync between different clocks, pass in an onTick function that will be called when
+        // the widget is ready for more data (on average at 40fps or so)
+        // backendClass should be one of the backends. set askPemission to true when connection is initiated by the user
+        if (!this.writer) {
+            let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
 
-        if (!ports.length && askPermission) {
-            await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
-            ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
-        }
-
-        if (ports.length) {
-            // just grab the first one; not gonna deal with multi usb-to-dmx setup just yet
-            let port = ports[0];
-            try {
-                await port.open({
-                    baudRate: 250 * 1000,
-                    dataBits: 8,
-                    stopBits: 2,
-                    parity: "none",
-                });
-            } catch (e) {
-                if (e.name != "InvalidStateError") {
-                    // invalid state error is when port is already open, which is fine by us.
-                    // Anything else we throw
-                    throw e;
-                }
+            if (!ports.length && askPermission) {
+                await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
+                ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
             }
 
-            this.port = port;
-            this.writer = await this.port.writable.getWriter();
+            if (ports.length) {
+                // just grab the first one; not gonna deal with multi usb-to-dmx setup just yet
+                let port = ports[0];
+                try {
+                    await port.open({
+                        baudRate: 250 * 1000,
+                        dataBits: 8,
+                        stopBits: 2,
+                        parity: "none",
+                    });
+                } catch (e) {
+                    if (e.name != "InvalidStateError") {
+                        // invalid state error is when port is already open, which is fine by us.
+                        // Anything else we throw
+                        throw e;
+                    }
+                }
+                this.port = port;
+                this.writer = await this.port.writable.getWriter();
+            }
         }
-    }
 
-    async connect(backendClass, onTick, askPermission = true) {
         this.onTick = onTick;
-        if (this.ready) {
-            return;
-        }
-
-        await this.init(backendClass, askPermission);
-        if (!this.writer) {
-            return;
-        }
-
+        this.backendClass = backendClass;
         if (this.backendClass) {
             this.backend = new this.backendClass(this.port, this.writer);
-            this.ready = true;
-            this._sendLoop();
         }
+        this._sendLoop();
+        return this.writer != null;
     }
 
     async _sendLoop() {
-        clearInterval(this._sendInterval);
-        if (this.writer) {
-            if (this.onTick) {
-                this.onTick();
-            }
+        clearInterval(this._sendTimeout);
+        if (this.onTick) {
+            this.onTick();
+        }
 
+        if (this.writer && this.backend) {
+            // if we are ready and we know who to send signals to
             await this.backend.sendSignal(this.data).catch(error => {
-                this.writer = null;
-                this.ready = false;
                 // Note: the failure message will appear in the logs a few times as we are not doing blocking requests
                 // here and so we might try issuing a bunch of sendSignals before we catch up with the fact that
                 // the dongle is gone
                 console.error(error);
                 console.error("Failed to send signal to DMX controller, will attempt to reconnect");
-            });
 
-            // Note: DMX protocol operates at max 44fps (but 40fps is safer as enttec pushes for that), so best we can
-            // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
-            this._sendInterval = setTimeout(() => this._sendLoop(), 25);
-        } else {
-            await this.connect(this.backendClass, this.onTick, false);
+                this.writer = null;
+                this.retry = true;
+            });
+        }
+
+        if (!this.writer && this.retry) {
+            // if we have lost writer and are not already in the middle of trying to connect
+            // we don't ask for permission as we assume we had it before
+            this.retry = false;
+            await this.connect(this.onTick, this.backendClass);
 
             if (!this.writer) {
                 console.info("Reconnect failed. Retry in 300ms");
-                this._sendInterval = setTimeout(() => this._sendLoop(), 300);
+                setTimeout(() => (this.retry = true), 300);
             }
         }
+
+        // Note: DMX protocol operates at max 44fps (but 40fps is safer as enttec pushes for that), so best we can
+        // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
+        this._sendTimeout = setTimeout(() => this._sendLoop(), 25);
     }
 
     async update(data) {
-        if (!this.backend) {
-            console.log("Can't run update before init() has been called!");
-            return;
-        }
-
         Object.entries(data).forEach(([ch, val]) => {
             let [chInt, valInt] = [parseInt(ch), parseInt(val)];
             if (chInt < 1 || chInt > 512) {
@@ -182,15 +174,22 @@ export class DMX {
                 this.data[chInt - 1] = valInt;
             }
         });
-        this.backend.onUpdate(data);
+        if (this.backend) {
+            this.backend.onUpdate(data);
+        }
+    }
+
+    async disconnect() {
+        if (this.writer) {
+            let writer = this.writer;
+            this.writer = null;
+            await writer.close();
+            await this.port.close();
+        }
     }
 
     async close() {
-        clearInterval(this._sendInterval);
-        if (this.writer) {
-            await this.writer.releaseLock();
-            await this.port.close();
-        }
-        this.ready = false;
+        this.disconnect();
+        clearInterval(this._sendTimeout);
     }
 }

@@ -1,3 +1,11 @@
+# 0.2.4
+
+-   Simplify the api so that we don't have a mysterious init and then a connect
+    on top of that. Also make sure that the ticker gets called regardless of
+    whether we are talking to something or not. This detaches any painting logic
+    from physical connection. Might later flip on this but sort of makes sense,
+    as we can't rely on apps clock as that one might overwhelm the DMX widget
+
 # 0.2.3
 
 -   Failed miserably with the sniffing of model because serial numbers for
