@@ -1,3 +1,9 @@
+# 0.2.5
+
+-   On failing open port still start ticking as we are relying on it. The error
+    is shown in console. Potentially might want to catch it, but this is fine
+    for now.
+
 # 0.2.4
 
 -   Simplify the api so that we don't have a mysterious init and then a connect

@@ -105,15 +105,15 @@ export class DMX {
                         stopBits: 2,
                         parity: "none",
                     });
+                    this.port = port;
+                    this.writer = await this.port.writable.getWriter();
                 } catch (e) {
                     if (e.name != "InvalidStateError") {
                         // invalid state error is when port is already open, which is fine by us.
                         // Anything else we throw
-                        throw e;
+                        console.error(e);
                     }
                 }
-                this.port = port;
-                this.writer = await this.port.writable.getWriter();
             }
         }
 
