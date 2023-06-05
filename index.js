@@ -17,9 +17,10 @@ export class SerialBackend extends Backend {
     }
 }
 
-export class Eurolite extends SerialBackend {
+export class BufferedBackend extends SerialBackend {
     // a buffered interface that is very specific about its init message
-    static label = "Eurolite Pro Mk2";
+    static type = "buffered";
+    static label = "Buffered (pro version)";
 
     constructor(port, writer) {
         super(port, writer);
@@ -34,7 +35,7 @@ export class Eurolite extends SerialBackend {
         if (this.same > 3 || !this.writer) {
             return;
         }
-        // every now and then the cache loses a frame and we end up with not the final state
+        // at times the device cache drops a frame and we don't end up in the final desired state
         // to mitigated that instead of using a 'changed' boolean we use a sameness incrementor
         // this means that we'll send 4 frames of the final state when things calm down
         this.same += 1;
@@ -43,10 +44,11 @@ export class Eurolite extends SerialBackend {
     }
 }
 
-export class EnttecOpen extends SerialBackend {
+export class DirectBackend extends SerialBackend {
     // just a dumb forwarder. one caveat is that you have to keep the tab visible or
     // otherwise chrome will spin down the timers and the lights will start flickering
-    static label = "Enttec Open DMX";
+    static type = "direct";
+    static label = "Direct (open version)";
 
     async sendSignal(data) {
         if (!this.port || !this.writer) {
@@ -62,7 +64,7 @@ export class EnttecOpen extends SerialBackend {
 }
 
 export class DMX {
-    static backends = [Eurolite, EnttecOpen];
+    static backends = [BufferedBackend, DirectBackend];
 
     constructor() {
         this.port = null;

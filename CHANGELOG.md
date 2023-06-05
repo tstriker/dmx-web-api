@@ -1,3 +1,8 @@
+# 0.2.6
+
+-   Generalize the backends into buffered and direct, as Enttec pro seems to be
+    happy running the same instruction set that eurolite pro is
+
 # 0.2.5
 
 -   On failing open port still start ticking as we are relying on it. The error
