@@ -80,6 +80,11 @@ export class DMX {
     }
 
     async canAccess() {
+        if (!navigator.serial) {
+            // navigator serial is only present in chrome - do not explode in firefox etc
+            return false;
+        }
+
         let ports = await navigator.serial.getPorts();
         return ports.length > 0;
     }
@@ -89,6 +94,11 @@ export class DMX {
         // to reduce off-sync between different clocks, pass in an onTick function that will be called when
         // the widget is ready for more data (on average at 40fps or so)
         // backendClass should be one of the backends. set askPemission to true when connection is initiated by the user
+        if (!navigator.serial) {
+            // navigator serial is only present in chrome - do not explode in firefox etc
+            return false;
+        }
+
         if (!this.writer) {
             let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
 

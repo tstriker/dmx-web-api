@@ -1,3 +1,8 @@
+# 0.2.7
+
+-   Do not explode in firefox - just bail out (more specifically, check if
+    `navigator.serial` exists)
+
 # 0.2.6
 
 -   Generalize the backends into buffered and direct, as Enttec pro seems to be
