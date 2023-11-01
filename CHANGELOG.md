@@ -1,3 +1,7 @@
+# 0.2.8
+
+-   Add line to readme about linux
+
 # 0.2.7
 
 -   Do not explode in firefox - just bail out (more specifically, check if

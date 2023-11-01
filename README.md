@@ -10,6 +10,14 @@ Patches for other devices are most welcome!
 
 Unfortunately other browsers do not yet support neither the Serial nor USB API's, generally claiming security reasons.
 
+# Linux
+
+On linux, the user running the browser needs to be in the `dialout` group, so make sure you run this line:
+
+```sudo usermod -a -G dialout $USER```
+
+And then reboot your device.
+
 # Install
 
 `npm install dmx-web-api`
