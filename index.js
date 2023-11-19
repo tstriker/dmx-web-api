@@ -96,6 +96,9 @@ export class DMX {
         // backendClass should be one of the backends. set askPemission to true when connection is initiated by the user
         if (!navigator.serial) {
             // navigator serial is only present in chrome - do not explode in firefox etc
+            if (askPermission) {
+                console.warn("Serial API does not seem to be supported on this browser, can't enable DMX control!");
+            }
             return false;
         }
 
