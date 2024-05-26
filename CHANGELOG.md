@@ -1,3 +1,7 @@
+# 0.2.9
+
+-   Add support for multiple universes via multiple dongles
+
 # 0.2.8
 
 -   Add line to readme about linux
