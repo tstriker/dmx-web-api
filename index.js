@@ -66,12 +66,18 @@ export class DirectBackend extends SerialBackend {
 export class DMX {
     static backends = [BufferedBackend, DirectBackend];
 
-    constructor() {
+    constructor(connectorIdx, manualTicks) {
         this.port = null;
         this.data = new Uint8Array(512);
         this.writer = null;
         this.onTick = null;
         this._sendTimeout = null;
+
+        // which connector are we connecting to in case if there are several
+        // there is no meaningful way to tell them apart, so we just grab first/second/etc and the person running lights
+        // can swap cables if the endpoints have suddenly flipped
+        this.connectorIdx = connectorIdx || 0;
+        this.manualTicks = manualTicks || false; // in case you'll be calling the sendLoop yourself
 
         this.backendClass = null;
         this.backend = null;
@@ -105,14 +111,13 @@ export class DMX {
         if (!this.writer) {
             let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
 
-            if (!ports.length && askPermission) {
+            if ((!ports.length || ports.length <= this.connectorIdx) && askPermission) {
                 await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
                 ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
             }
 
             if (ports.length) {
-                // just grab the first one; not gonna deal with multi usb-to-dmx setup just yet
-                let port = ports[0];
+                let port = ports[this.connectorIdx];
                 try {
                     await port.open({
                         baudRate: 250 * 1000,
@@ -137,16 +142,14 @@ export class DMX {
         if (this.backendClass) {
             this.backend = new this.backendClass(this.port, this.writer);
         }
-        this._sendLoop();
+
+        if (!this.manualTicks) {
+            this._sendLoop();
+        }
         return this.writer != null;
     }
 
-    async _sendLoop() {
-        clearInterval(this._sendTimeout);
-        if (this.onTick) {
-            this.onTick();
-        }
-
+    async tick() {
         if (this.writer && this.backend) {
             // if we are ready and we know who to send signals to
             await this.backend.sendSignal(this.data).catch(error => {
@@ -172,6 +175,15 @@ export class DMX {
                 setTimeout(() => (this.retry = true), 300);
             }
         }
+    }
+
+    async _sendLoop() {
+        clearInterval(this._sendTimeout);
+        if (this.onTick) {
+            this.onTick();
+        }
+
+        await this.tick();
 
         // Note: DMX protocol operates at max 44fps (but 40fps is safer as enttec pushes for that), so best we can
         // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
