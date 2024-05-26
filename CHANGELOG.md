@@ -1,3 +1,7 @@
+# 0.2.10
+
+-   Fix explode in connect when trying to open a port that's not there
+
 # 0.2.9
 
 -   Add support for multiple universes via multiple dongles

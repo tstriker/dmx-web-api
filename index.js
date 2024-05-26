@@ -116,7 +116,7 @@ export class DMX {
                 ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
             }
 
-            if (ports.length) {
+            if (ports[this.connectorIdx]) {
                 let port = ports[this.connectorIdx];
                 try {
                     await port.open({
