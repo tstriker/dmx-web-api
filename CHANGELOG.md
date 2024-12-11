@@ -1,3 +1,7 @@
+# 0.2.11
+
+-   Fix reconnecting when we don't send any data
+
 # 0.2.10
 
 -   Fix explode in connect when trying to open a port that's not there

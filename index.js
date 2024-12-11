@@ -82,6 +82,7 @@ export class DMX {
         this.backendClass = null;
         this.backend = null;
 
+        this.connected = false;
         this.retry = false;
     }
 
@@ -109,11 +110,13 @@ export class DMX {
         }
 
         if (!this.writer) {
-            let ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
+            let deviceCriteria = {filters: [{usbVendorId: 0x0403}]};
+
+            let ports = await navigator.serial.getPorts(deviceCriteria);
 
             if ((!ports.length || ports.length <= this.connectorIdx) && askPermission) {
-                await navigator.serial.requestPort({filters: [{usbVendorId: 0x0403}]});
-                ports = await navigator.serial.getPorts({filters: [{usbVendorId: 0x0403}]});
+                await navigator.serial.requestPort(deviceCriteria);
+                ports = await navigator.serial.getPorts(deviceCriteria);
             }
 
             if (ports[this.connectorIdx]) {
@@ -157,7 +160,6 @@ export class DMX {
                 // here and so we might try issuing a bunch of sendSignals before we catch up with the fact that
                 // the dongle is gone
                 console.error(error);
-                console.error("Failed to send signal to DMX controller, will attempt to reconnect");
 
                 this.writer = null;
                 this.retry = true;
@@ -179,8 +181,17 @@ export class DMX {
 
     async _sendLoop() {
         clearInterval(this._sendTimeout);
+
+        let connected = this.port?.connected;
+        if (this.backend && connected != this.connected) {
+            // trigger backend reset when connection changes
+            // this affects buffered backend and fixes reconnect
+            this.backend.onUpdate();
+        }
+        this.connected = connected;
+
         if (this.onTick) {
-            this.onTick();
+            this.onTick(connected);
         }
 
         await this.tick();
