@@ -180,7 +180,7 @@ export class DMX {
     }
 
     async _sendLoop() {
-        clearInterval(this._sendTimeout);
+        clearTimeout(this._sendTimeout);
 
         let connected = this.port?.connected;
         if (this.backend && connected != this.connected) {
