@@ -1,5 +1,4 @@
 class Backend {
-    // abstract away the different ways to talk DMX
     label = "";
     init() {}
     onUpdate() {}
@@ -25,6 +24,16 @@ export class BufferedBackend extends SerialBackend {
     constructor(port, writer) {
         super(port, writer);
         this.same = 0;
+        // PERFORMANCE: Pre-allocate the buffer once to avoid creating new arrays on every frame.
+        // The buffer includes the DMXking protocol header and footer.
+        // [header(5), data(512), footer(1)]
+        this.buffer = new Uint8Array(518);
+        this.buffer[0] = 0x7e; // DMX Start Code
+        this.buffer[1] = 0x06; // DMX Label
+        this.buffer[2] = 0x01; // Data length LSB
+        this.buffer[3] = 0x02; // Data length MSB (513)
+        this.buffer[4] = 0x00; // DMX Start Code for data
+        this.buffer[517] = 0xe7; // DMX End Code
     }
 
     onUpdate() {
@@ -35,12 +44,15 @@ export class BufferedBackend extends SerialBackend {
         if (this.same > 3 || !this.writer) {
             return;
         }
-        // at times the device cache drops a frame and we don't end up in the final desired state
-        // to mitigated that instead of using a 'changed' boolean we use a sameness incrementor
-        // this means that we'll send 4 frames of the final state when things calm down
+
+        // This counter ensures the final state is sent multiple times to mitigate dropped frames.
         this.same += 1;
+
+        // The DMX channel data is placed after the 5-byte header.
+        this.buffer.set(data, 5);
+
         await this.writer.ready;
-        await this.writer.write(new Uint8Array([0x7e, 0x06, 0x01, 0x02, 0x00, ...data, 0xe7]));
+        await this.writer.write(this.buffer);
     }
 }
 
@@ -50,16 +62,28 @@ export class DirectBackend extends SerialBackend {
     static type = "direct";
     static label = "Direct (open version)";
 
+    constructor(port, writer) {
+        super(port, writer);
+        // The buffer includes the DMX start code (0x00).
+        // [start_code(1), data(512)]
+        this.buffer = new Uint8Array(513);
+        this.buffer[0] = 0x00; // DMX Start Code for data
+    }
+
     async sendSignal(data) {
         if (!this.port || !this.writer) {
-            // we are not ready yet
-            return;
+            return; // Not ready yet.
         }
 
+        // PERFORMANCE: Copy the DMX data into our pre-allocated buffer.
+        // The data is placed after the 1-byte start code.
+        this.buffer.set(data, 1);
+
         await this.writer.ready;
+        // The 'break' signal is part of the DMX protocol to signify the start of a new frame.
         await this.port.setSignals({break: true, requestToSend: false});
         await this.port.setSignals({break: false, requestToSend: false});
-        await this.writer.write(new Uint8Array([0x00, ...data]));
+        await this.writer.write(this.buffer);
     }
 }
 
@@ -81,9 +105,9 @@ export class DMX {
 
         this.backendClass = null;
         this.backend = null;
-
         this.connected = false;
         this.retry = false;
+        this.id = Math.round(Math.random() * 100000);
     }
 
     async canAccess() {
@@ -91,8 +115,7 @@ export class DMX {
             // navigator serial is only present in chrome - do not explode in firefox etc
             return false;
         }
-
-        let ports = await navigator.serial.getPorts();
+        const ports = await navigator.serial.getPorts();
         return ports.length > 0;
     }
 
@@ -104,14 +127,13 @@ export class DMX {
         if (!navigator.serial) {
             // navigator serial is only present in chrome - do not explode in firefox etc
             if (askPermission) {
-                console.warn("Serial API does not seem to be supported on this browser, can't enable DMX control!");
+                console.warn("Web Serial API not supported. Cannot enable DMX control.");
             }
             return false;
         }
 
         if (!this.writer) {
-            let deviceCriteria = {filters: [{usbVendorId: 0x0403}]};
-
+            const deviceCriteria = {filters: [{usbVendorId: 0x0403}]};
             let ports = await navigator.serial.getPorts(deviceCriteria);
 
             if ((!ports.length || ports.length <= this.connectorIdx) && askPermission) {
@@ -120,10 +142,10 @@ export class DMX {
             }
 
             if (ports[this.connectorIdx]) {
-                let port = ports[this.connectorIdx];
+                const port = ports[this.connectorIdx];
                 try {
                     await port.open({
-                        baudRate: 250 * 1000,
+                        baudRate: 250000,
                         dataBits: 8,
                         stopBits: 2,
                         parity: "none",
@@ -173,7 +195,7 @@ export class DMX {
             await this.connect(this.onTick, this.backendClass);
 
             if (!this.writer) {
-                console.info("Reconnect failed. Retry in 300ms");
+                console.info("Reconnect failed. Retrying in 300ms.");
                 setTimeout(() => (this.retry = true), 300);
             }
         }
@@ -190,11 +212,14 @@ export class DMX {
         }
         this.connected = connected;
 
+        let doNotSend = false;
         if (this.onTick) {
-            this.onTick(connected);
+            doNotSend = this.onTick(connected);
         }
-
-        await this.tick();
+        if (doNotSend !== true) {
+            // onTick callback can decide that it's not ready just yet
+            await this.tick();
+        }
 
         // Note: DMX protocol operates at max 44fps (but 40fps is safer as enttec pushes for that), so best we can
         // hope for is a frame every 25ms https://en.wikipedia.org/wiki/DMX512
@@ -202,16 +227,26 @@ export class DMX {
     }
 
     async update(data) {
-        Object.entries(data).forEach(([ch, val]) => {
-            let [chInt, valInt] = [parseInt(ch), parseInt(val)];
-            if (chInt < 1 || chInt > 512) {
-                console.error(`Channel should be between 1 and 512. Received ${ch}`);
-            } else if (valInt < 0 || valInt > 255) {
-                console.error(`Value should be between 0 and 255. Received channel: ${ch}, value: ${val}`);
-            } else {
-                this.data[chInt - 1] = valInt;
+        if (data instanceof Uint8Array) {
+            // the passed in array is 1-indexed, so that we can do channels[1] = "red", instead of having to account
+            // for 0-indexing. as a result we need to grab from the 1st position
+            this.data.set(data.subarray(1, 513));
+        } else {
+            for (const ch in data) {
+                const val = data[ch];
+                const chInt = parseInt(ch, 10);
+                const valInt = parseInt(val, 10);
+
+                if (chInt < 1 || chInt > 512) {
+                    console.error(`Channel should be between 1 and 512. Received ${ch}`);
+                } else if (valInt < 0 || valInt > 255) {
+                    console.error(`Value should be between 0 and 255. Received channel: ${ch}, value: ${val}`);
+                } else {
+                    this.data[chInt - 1] = valInt;
+                }
             }
-        });
+        }
+
         if (this.backend) {
             this.backend.onUpdate(data);
         }
@@ -219,7 +254,7 @@ export class DMX {
 
     async disconnect() {
         if (this.writer) {
-            let writer = this.writer;
+            const writer = this.writer;
             this.writer = null;
             await writer.close();
             await this.port.close();
@@ -227,7 +262,7 @@ export class DMX {
     }
 
     async close() {
-        this.disconnect();
-        clearInterval(this._sendTimeout);
+        clearTimeout(this._sendTimeout);
+        await this.disconnect();
     }
 }
